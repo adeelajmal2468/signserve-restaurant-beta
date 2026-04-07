@@ -7,6 +7,7 @@ import json
 import threading
 from collections import Counter, deque
 from pathlib import Path
+import pathlib
 
 import av
 import cv2
@@ -29,10 +30,10 @@ st.set_page_config(
 # ============================================================
 # CONFIG
 # ============================================================
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = pathlib.Path(__file__).parent.resolve()
 MODELS_DIR = BASE_DIR / "models"
 
-MODEL_PATH = MODELS_DIR / "best_bigru_attention_aug.keras"
+MODEL_PATH = BASE_DIR / "models" / "best_bigru_attention_aug.keras"
 CLASS_NAMES_PATH = MODELS_DIR / "class_names.json"
 
 SEQUENCE_LENGTH = 30
