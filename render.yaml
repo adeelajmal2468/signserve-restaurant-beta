@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: signserve-beta
+    runtime: docker
+    envVars:
+      - key: PORT
+        value: 10000
