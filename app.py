@@ -29,7 +29,7 @@ st.set_page_config(
 # ============================================================
 # CONFIG
 # ============================================================
-MODEL_PATH = Path("models/best_bigru_attention_aug.keras")
+MODEL_PATH = Path("models/best_bigru_attention_aug.keras.zip")
 CLASS_NAMES_PATH = Path("models/class_names.json")
 
 SEQUENCE_LENGTH = 30
