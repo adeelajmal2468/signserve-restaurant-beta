@@ -29,8 +29,11 @@ st.set_page_config(
 # ============================================================
 # CONFIG
 # ============================================================
-MODEL_PATH = Path("models/best_bigru_attention_aug.keras")
-CLASS_NAMES_PATH = Path("models/class_names.json")
+BASE_DIR = Path(__file__).resolve().parent
+MODELS_DIR = BASE_DIR / "models"
+
+MODEL_PATH = MODELS_DIR / "best_bigru_attention_aug.keras"
+CLASS_NAMES_PATH = MODELS_DIR / "class_names.json"
 
 SEQUENCE_LENGTH = 30
 FEATURE_DIM = 225
@@ -51,6 +54,9 @@ IDLE_RESET_FRAMES = 12
 RTC_CONFIGURATION = {
     "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
 }
+
+# Turn on temporarily if you want to inspect deployment paths in the app UI
+DEBUG_DEPLOYMENT = False
 
 # ============================================================
 # THEME / CSS
@@ -133,25 +139,79 @@ class AttentionPooling(tf.keras.layers.Layer):
 # ============================================================
 # LOAD MODEL
 # ============================================================
+def deployment_debug_info():
+    info = {
+        "current_working_directory": str(Path.cwd()),
+        "base_dir": str(BASE_DIR),
+        "models_dir": str(MODELS_DIR),
+        "model_path": str(MODEL_PATH),
+        "class_names_path": str(CLASS_NAMES_PATH),
+        "base_dir_exists": BASE_DIR.exists(),
+        "models_dir_exists": MODELS_DIR.exists(),
+        "model_exists": MODEL_PATH.exists(),
+        "class_names_exists": CLASS_NAMES_PATH.exists(),
+    }
+
+    try:
+        info["base_dir_contents"] = sorted([p.name for p in BASE_DIR.iterdir()])
+    except Exception as e:
+        info["base_dir_contents"] = [f"<unable to read: {e}>"]
+
+    if MODELS_DIR.exists():
+        try:
+            info["models_dir_contents"] = sorted([p.name for p in MODELS_DIR.iterdir()])
+        except Exception as e:
+            info["models_dir_contents"] = [f"<unable to read: {e}>"]
+    else:
+        info["models_dir_contents"] = []
+
+    return info
+
+
 @st.cache_resource(show_spinner=True)
 def load_artifacts():
     if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model not found: {MODEL_PATH}")
+        raise FileNotFoundError(
+            f"Model file not found at: {MODEL_PATH}\n"
+            "Make sure 'models/best_bigru_attention_aug.keras' is committed to your repo."
+        )
+
     if not CLASS_NAMES_PATH.exists():
-        raise FileNotFoundError(f"Class names file not found: {CLASS_NAMES_PATH}")
+        raise FileNotFoundError(
+            f"Class names file not found at: {CLASS_NAMES_PATH}\n"
+            "Make sure 'models/class_names.json' is committed to your repo."
+        )
 
     with open(CLASS_NAMES_PATH, "r", encoding="utf-8") as f:
         class_names = json.load(f)
 
     model = tf.keras.models.load_model(
-        MODEL_PATH,
+        str(MODEL_PATH),
         custom_objects={"AttentionPooling": AttentionPooling},
         compile=False,
     )
     return model, class_names
 
 
-MODEL, CLASS_NAMES = load_artifacts()
+def load_artifacts_or_stop():
+    try:
+        return load_artifacts()
+    except Exception as e:
+        st.error("App startup failed while loading model artifacts.")
+        st.code(str(e))
+
+        debug_info = deployment_debug_info()
+        with st.expander("Deployment diagnostics", expanded=True):
+            st.json(debug_info)
+
+        st.warning(
+            "This code fixes the path issue, but the actual model file still must exist "
+            "inside your deployed GitHub repo under 'models/'."
+        )
+        st.stop()
+
+
+MODEL, CLASS_NAMES = load_artifacts_or_stop()
 
 # ============================================================
 # HELPERS
@@ -173,11 +233,13 @@ def extract_landmarks(results):
         for i, lm in enumerate(results.right_hand_landmarks.landmark[:21]):
             right_hand[i] = [lm.x, lm.y, lm.z]
 
-    frame = np.concatenate([
-        pose.flatten(),
-        left_hand.flatten(),
-        right_hand.flatten(),
-    ]).astype(np.float32)
+    frame = np.concatenate(
+        [
+            pose.flatten(),
+            left_hand.flatten(),
+            right_hand.flatten(),
+        ]
+    ).astype(np.float32)
     return frame
 
 
@@ -297,42 +359,83 @@ def draw_landmarks(frame, results, mp_drawing, mp_holistic):
         )
 
 
-def draw_right_panel(width, height, display_label, display_conf, status, recent_preds, history):
+def draw_right_panel(
+    width,
+    height,
+    display_label,
+    display_conf,
+    status,
+    recent_preds,
+    history,
+):
     panel = np.full((height, width, 3), 247, dtype=np.uint8)
 
     y = 40
-    cv2.putText(panel, "SignServe Beta", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2)
+    cv2.putText(
+        panel, "SignServe Beta", (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (20, 20, 20), 2
+    )
     y += 45
 
     cv2.rectangle(panel, (20, y), (width - 20, y + 100), (231, 243, 255), -1)
     cv2.rectangle(panel, (20, y), (width - 20, y + 100), (191, 219, 254), 2)
-    cv2.putText(panel, "Prediction", (34, y + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (55, 65, 81), 2)
-    cv2.putText(panel, display_label[:26], (34, y + 70), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (15, 23, 42), 2)
+    cv2.putText(
+        panel, "Prediction", (34, y + 28),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (55, 65, 81), 2
+    )
+    cv2.putText(
+        panel, display_label[:26], (34, y + 70),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (15, 23, 42), 2
+    )
     y += 130
 
-    cv2.putText(panel, f"Confidence: {display_conf:.2f}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.68, (51, 65, 85), 2)
+    cv2.putText(
+        panel, f"Confidence: {display_conf:.2f}", (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.68, (51, 65, 85), 2
+    )
     y += 35
-    cv2.putText(panel, f"Status: {status}", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.68, (51, 65, 85), 2)
+    cv2.putText(
+        panel, f"Status: {status}", (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.68, (51, 65, 85), 2
+    )
     y += 45
 
-    cv2.putText(panel, "Recent predictions", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (20, 20, 20), 2)
+    cv2.putText(
+        panel, "Recent predictions", (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.72, (20, 20, 20), 2
+    )
     y += 30
     if len(recent_preds) == 0:
-        cv2.putText(panel, "-", (30, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (100, 100, 100), 2)
+        cv2.putText(
+            panel, "-", (30, y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.62, (100, 100, 100), 2
+        )
         y += 25
     else:
         for label, conf in list(recent_preds)[-5:]:
-            cv2.putText(panel, f"{label[:18]} ({conf:.2f})", (30, y), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (80, 80, 80), 2)
+            cv2.putText(
+                panel, f"{label[:18]} ({conf:.2f})", (30, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.56, (80, 80, 80), 2
+            )
             y += 24
 
     y += 20
-    cv2.putText(panel, "History", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (20, 20, 20), 2)
+    cv2.putText(
+        panel, "History", (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.72, (20, 20, 20), 2
+    )
     y += 30
     if len(history) == 0:
-        cv2.putText(panel, "-", (30, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (100, 100, 100), 2)
+        cv2.putText(
+            panel, "-", (30, y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.62, (100, 100, 100), 2
+        )
     else:
         for item in history[-MAX_HISTORY:]:
-            cv2.putText(panel, item[:24], (30, y), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (50, 50, 50), 2)
+            cv2.putText(
+                panel, item[:24], (30, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.60, (50, 50, 50), 2
+            )
             y += 26
             if y > height - 20:
                 break
@@ -402,8 +505,13 @@ class SignVideoProcessor:
             self.status = "Idle"
             self.last_stable_label = None
 
-        elif len(self.sequence_buffer) == SEQUENCE_LENGTH and self.frame_count % PREDICT_EVERY_N_FRAMES == 0:
-            can_predict, gate_status = should_run_prediction(self.sequence_buffer, results)
+        elif (
+            len(self.sequence_buffer) == SEQUENCE_LENGTH
+            and self.frame_count % PREDICT_EVERY_N_FRAMES == 0
+        ):
+            can_predict, gate_status = should_run_prediction(
+                self.sequence_buffer, results
+            )
 
             if can_predict:
                 seq = np.array(self.sequence_buffer, dtype=np.float32)
@@ -416,7 +524,11 @@ class SignVideoProcessor:
 
                 if pred_conf >= CONFIDENCE_THRESHOLD:
                     self.prediction_queue.append((pred_label, pred_conf))
-                    self.display_label, self.display_conf, self.status = get_stable_prediction(self.prediction_queue)
+                    (
+                        self.display_label,
+                        self.display_conf,
+                        self.status,
+                    ) = get_stable_prediction(self.prediction_queue)
                 else:
                     self.prediction_queue.clear()
                     self.display_label = NO_SIGN_LABEL
@@ -482,12 +594,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if DEBUG_DEPLOYMENT:
+    with st.expander("Debug paths"):
+        st.json(deployment_debug_info())
+
 left_col, right_col = st.columns([2.3, 1.1], gap="large")
 
 with left_col:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Live recognition")
-    st.caption("Click Start, allow camera access, and test the model directly in your browser.")
+    st.caption(
+        "Click Start, allow camera access, and test the model directly in your browser."
+    )
 
     webrtc_streamer(
         key="signserve-beta",
@@ -498,7 +616,7 @@ with left_col:
         async_processing=True,
     )
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with right_col:
     st.markdown(
