@@ -3,5 +3,4 @@ streamlit-webrtc==0.64.5
 mediapipe==0.10.21
 tensorflow==2.16.1
 av==16.1.0
-libgl1
-libglib2.0-0
+opencv-python-headless
